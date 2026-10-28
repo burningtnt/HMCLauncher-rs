@@ -10,7 +10,6 @@ jobs:
     permissions:
       contents: write
     env:
-      LAUNCHER_PATH: target\i686-win7-windows-msvc\release\HMCLauncher.exe
       RUST_TOOLCHAIN: nightly-2026-04-16
       HMCL_VERSION: 3.13.1
     steps:
@@ -25,11 +24,31 @@ jobs:
         shell: pwsh
         run: |
           cargo build --release --locked
-          Copy-Item -Path $env:LAUNCHER_PATH -Destination target\HMCLauncher-${{ env.SHORT_SHA }}.exe
+          Move-Item -Path "target\i686-win7-windows-msvc\release\HMCLauncher.exe" -Destination "target\HMCLauncher-$env:SHORT_SHA-unsigned.exe"
+      - name: Upload Unsigned HMCLauncher exe
+        id: upload-hmclauncher-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          path: target\HMCLauncher-${{ env.SHORT_SHA }}-unsigned.exe
+          archive: false
+      - name: Sign HMCLauncher exe
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ vars.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ vars.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: 'test-signing'
+          github-artifact-id: '${{ steps.upload-hmclauncher-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          skip-decompress: true
+          output-artifact-directory: target\signed
+      - name: Download HMCLauncher exe
+        shell: pwsh
+        run: |
+          Move-Item -Path "target\signed\HMCLauncher-$env:SHORT_SHA-unsigned.exe" -Destination "target\HMCLauncher-$env:SHORT_SHA.exe"
       - name: Upload HMCLauncher exe
         uses: actions/upload-artifact@v7
         with:
-          name: HMCLauncher.exe
           path: target\HMCLauncher-${{ env.SHORT_SHA }}.exe
           archive: false
       - name: Download HMCL jar
@@ -41,8 +60,8 @@ jobs:
           Invoke-WebRequest -Uri $downloadUrl -OutFile "target\$jarFileName"
       - name: Create HMCL exe
         shell: pwsh
-        run: |
-          $exeBytes = [System.IO.File]::ReadAllBytes($env:LAUNCHER_PATH)
+        run: |          
+          $exeBytes = [System.IO.File]::ReadAllBytes("target\HMCLauncher-$env:SHORT_SHA.exe")
           $jarBytes = [System.IO.File]::ReadAllBytes("target\HMCL-$env:HMCL_VERSION.jar")
           
           $mergedBytes = $exeBytes + $jarBytes
@@ -60,4 +79,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create $env:RELEASE_TAG $env:LAUNCHER_PATH --verify-tag
+        run: gh release create $env:RELEASE_TAG "target\HMCLauncher-$env:SHORT_SHA.exe" --verify-tag
